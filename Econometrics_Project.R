@@ -642,3 +642,59 @@ stargazer(model_final, model_probit, lpm,
           digits = 3)
 
 
+# 5. Conclusion ---------------------------------------------------------------
+cat("
+================================================================================
+CONCLUSION
+================================================================================
+
+This study examines what makes mass demonstrations turn violent using 15,239
+protest events from the Mass Mobilization dataset (1990-2020, 166 countries).
+A binary logit model was selected via LSE general-to-specific elimination and
+estimated with country-clustered standard errors throughout.
+
+KEY FINDINGS
+------------
+1. Cumulative state repression (+35pp) is the dominant predictor of protest
+   violence. Countries with a long history of violent state responses trap
+   subsequent protests in an escalation cycle, regardless of the immediate
+   cause of mobilisation.
+
+2. Demand type is the second major driver. Protests demanding police
+   accountability (+26pp), price/tax relief (+24pp), and land rights (+15pp)
+   are the most likely to turn violent, reflecting the inherently confrontational
+   framing of these grievances. Protests combining more demand types are
+   paradoxically less violent (-8pp per additional demand), possibly because
+   broader coalitions are harder to provoke.
+
+3. Protest size has a small negative effect (-2pp per log-unit), suggesting
+   that larger, more visible mobilisations face heavier policing or benefit
+   from crowd diffusion effects that dampen individual-level violence.
+
+4. Short-run state violence (1-period lag, +6pp) reinforces the long-run
+   repression effect, confirming that escalation is path-dependent.
+
+5. Regional effects are substantial: protests in Europe (-10pp) and MENA
+   (-9pp) are less likely to be violent than the African baseline, conditional
+   on all other covariates, pointing to unobserved institutional differences.
+
+MODEL FIT AND CAVEATS
+---------------------
+Fit is modest (McFadden R2 = 0.066, AUC = 0.677), as expected for
+aggregate event-level data where unobserved factors (police tactics on the
+day, protest leadership, media coverage) play a large role. The Stukel test
+and linktest both flag potential nonlinearity in the tails of the index
+function, suggesting that interaction terms or higher-order size effects
+could improve calibration. All qualitative conclusions are robust to
+replacing the logit with a probit or a heteroscedasticity-corrected LPM.
+
+POLICY IMPLICATION
+------------------
+The single most actionable lever is the state's own behaviour: reducing
+habitual repressive responses lowers the baseline probability of violence
+at future protests. Demand-side interventions (addressing police brutality
+complaints, price pressures) also reduce violence risk by defusing the
+most confrontational mobilisation types.
+================================================================================
+")
+
