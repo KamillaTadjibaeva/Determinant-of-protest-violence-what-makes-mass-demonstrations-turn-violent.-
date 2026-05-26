@@ -1,43 +1,54 @@
-# install.packages("mfx")
-# install.packages(c('Hmisc', 'polspline'))
-# install.packages('biglm')
-# install.packages(c('rms', 'statmod', 'speedglm'))
-# install.packages("countrycode")
+# 0. Setup --------------------------------------------------------------------
+# All library() calls live here so the script has a single dependency surface.
+# install.packages(c("sandwich", "lmtest", "MASS", "mfx", "aod", "dplyr",
+#                    "logistf", "stargazer", "car", "corrplot"))
 
-library("sandwich")
-library("lmtest")
-library("MASS")
-library("mfx")
-library("aod")
+library(sandwich)    # robust / cluster-robust variance-covariance matrices
+library(lmtest)      # coeftest(), lrtest()
+library(MASS)
+library(mfx)         # logitmfx(): marginal effects for logit
+library(aod)         # wald.test()
 library(dplyr)
-library("logistf")
-library(countrycode)
+library(logistf)     # Firth's bias-reduced logit (for quasi-separation)
+library(stargazer)   # publication-quality summary / regression tables
+library(car)         # vif()
+library(corrplot)    # correlation heatmaps
+library(pROC)        # roc(), auc(), coords() for ROC curve
 
+
+# 1. Data Loading & Cleaning --------------------------------------------------
+# Read the raw Mass Mobilization file, keep only protest events, and build the
+# analytic features used by the model (size, duration, demand dummies, lags).
+
+## 1.1 Load & filter ----------------------------------------------------------
 data <- read.csv("dataverse_files/mmALL_073120_csv.csv", stringsAsFactors = FALSE)
 str(data)
 
-# Keep only protest events (non-protest rows have no meaningful DV)
+# Non-protest rows have no meaningful DV (protesterviolence is undefined there).
 data <- data[data$protest == 1, ]
 
 data$country <- factor(data$country)
-# Region factor with labels
-data$region <- factor(data$region)
-                      # levels = 1:7,
-                      # labels = c("South America", "Central America",
-                      #            "North America", "Europe", "Asia",
-                      #            "MENA", "Africa"))
+data$region  <- factor(data$region)
+# Region codes (left as numeric labels):
+# 1 South America, 2 Central America, 3 North America, 4 Europe,
+# 5 Asia, 6 MENA, 7 Africa
 
-# Convert start/end dates
+## 1.2 Dates & duration -------------------------------------------------------
+# Build proper Date objects and compute event length in days.
 data$start_date <- as.Date(paste(data$startyear, data$startmonth, data$startday, sep = "-"),
                            format = "%Y-%m-%d")
-data$end_date <- as.Date(paste(data$endyear, data$endmonth, data$endday, sep = "-"),
-                         format = "%Y-%m-%d")
+data$end_date   <- as.Date(paste(data$endyear,   data$endmonth,   data$endday,   sep = "-"),
+                           format = "%Y-%m-%d")
 
-# Protest duration in days
 data$duration_days <- as.numeric(data$end_date - data$start_date)
-data$duration_days[data$duration_days < 0] <- 0
+data$duration_days[data$duration_days < 0] <- 0  # guard against bad rows
 
-# Midpoint encoding for participants_category
+## 1.3 Protest size -----------------------------------------------------------
+# Two source columns exist: a bucketed `participants_category` and a free-text
+# `participants` field. We harmonise both into a single numeric `protest_size`,
+# log-transform it (heavy right skew), and impute missing values by country
+# median while flagging the imputation.
+
 category_midpoints <- c(
   "50-99"      = 75,
   "100-999"    = 550,
@@ -46,11 +57,9 @@ category_midpoints <- c(
   "5000-10000" = 7500,
   ">10000"     = 15000
 )
-
-# encode participants_category via midpoints
 data$size_from_category <- category_midpoints[data$participants_category]
 
-# clean raw participants column (handles "1000s", "100s", plain numbers)
+# Parse the free-text column: handles plain numbers and "1000s" / "100s" suffixes.
 data$size_from_raw <- sapply(data$participants, function(x) {
   if (is.na(x) || x == "") return(NA)
   x <- trimws(as.character(x))
@@ -63,27 +72,12 @@ data$size_from_raw <- sapply(data$participants, function(x) {
   }
 })
 
-# unified column — category first, raw as backup
+# Prefer the bucketed estimate; fall back to the parsed raw number.
 data$protest_size <- ifelse(!is.na(data$size_from_category),
                             data$size_from_category,
                             data$size_from_raw)
 
-par(mfrow = c(1, 2))
-
-# skew problem
-hist(data$protest_size[!is.na(data$protest_size)], breaks = 50,
-     col = "steelblue", border = "white",
-     main = "Protest Size (Raw)", xlab = "Participants")
-abline(v = median(data$protest_size, na.rm = TRUE), col = "red", lwd = 2, lty = 2)
-
-# Log — why we transform
-hist(log(data$protest_size[!is.na(data$protest_size)] + 1), breaks = 30,
-     col = "darkgreen", border = "white",
-     main = "Protest Size (Log)", xlab = "log(Participants + 1)")
-
-par(mfrow = c(1, 1))
-
-# Impute missing protest_size with country-specific median + add missing indicator
+# Imputation: country-specific median, global median fallback, with indicator.
 data$protest_size_missing <- ifelse(is.na(data$protest_size), 1, 0)
 
 country_medians <- data %>%
@@ -94,172 +88,103 @@ data <- data %>%
   left_join(country_medians, by = "country") %>%
   mutate(
     protest_size = ifelse(is.na(protest_size), med_size, protest_size),
-    # If a country has NO observed sizes at all, fall back to global median
-    protest_size = ifelse(is.na(protest_size), median(protest_size, na.rm = TRUE), protest_size)
+    protest_size = ifelse(is.na(protest_size),
+                          median(protest_size, na.rm = TRUE),
+                          protest_size)
   ) %>%
   select(-med_size)
 
-# Log-transform for model input
 data$log_protest_size <- log(data$protest_size + 1)
+data$large_protest    <- ifelse(data$protest_size >= 1000, 1, 0)
 
-# Check coverage
+# Provenance — how many observations came from each source.
 cat("Category available:", sum(!is.na(data$size_from_category)), "\n")
-cat("Raw filled gaps:", sum(is.na(data$size_from_category) & !is.na(data$size_from_raw)), "\n")
+cat("Raw filled gaps:",   sum(is.na(data$size_from_category) & !is.na(data$size_from_raw)), "\n")
 cat("Imputed (missing indicator = 1):", sum(data$protest_size_missing), "\n")
 
 data$size_from_category <- NULL
-data$size_from_raw <- NULL
+data$size_from_raw      <- NULL
 
-# Creating demand dummies by searching text across ALL 4 demand columns
-demand_cols <- c("protesterdemand1", "protesterdemand2", "protesterdemand3", "protesterdemand4")
+## 1.4 Demand features --------------------------------------------------------
+# The raw data lists up to 4 free-text demands per event. We collapse them into
+# binary topic dummies via keyword matching, plus a count of total demands.
 
-data$demand_labor <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("labor|wage", row, ignore.case = TRUE)))
-})
+demand_cols <- c("protesterdemand1", "protesterdemand2",
+                 "protesterdemand3", "protesterdemand4")
 
-data$demand_land <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("land|farm", row, ignore.case = TRUE)))
-})
+make_demand_dummy <- function(pattern) {
+  apply(data[, demand_cols], 1, function(row) {
+    as.integer(any(grepl(pattern, row, ignore.case = TRUE)))
+  })
+}
 
-data$demand_police <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("police|brutal", row, ignore.case = TRUE)))
-})
+data$demand_labor      <- make_demand_dummy("labor|wage")
+data$demand_land       <- make_demand_dummy("land|farm")
+data$demand_police     <- make_demand_dummy("police|brutal")
+data$demand_political  <- make_demand_dummy("political|process")
+data$demand_prices     <- make_demand_dummy("price|tax")
+data$demand_corruption <- make_demand_dummy("remov|corrupt")
+data$demand_social     <- make_demand_dummy("social")
 
-data$demand_political <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("political|process", row, ignore.case = TRUE)))
-})
-
-data$demand_prices <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("price|tax", row, ignore.case = TRUE)))
-})
-
-data$demand_corruption <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("remov|corrupt", row, ignore.case = TRUE)))
-})
-
-data$demand_social <- apply(data[, demand_cols], 1, function(row) {
-  as.integer(any(grepl("social", row, ignore.case = TRUE)))
-})
-
-# Number of demands per protest (count non-empty demand columns)
 data$n_demands <- apply(data[, demand_cols], 1, function(row) {
   sum(row != "" & !is.na(row))
 })
 
-# Large protest indicator (>= 1000 participants)
-data$large_protest <- ifelse(data$protest_size >= 1000, 1, 0)
+## 1.5 State-violence lags ----------------------------------------------------
+# Past state repression is a strong theoretical predictor of escalation.
+# We build (a) a 1-period lag and (b) the cumulative running mean of state
+# violence, both within country and computed BEFORE the current event so they
+# can serve as predictors without leakage.
 
-# State used violence at this event? (needed ONLY to compute lags)
 response_cols <- c("stateresponse1", "stateresponse2", "stateresponse3",
-                   "stateresponse4", "stateresponse5", "stateresponse6", "stateresponse7")
+                   "stateresponse4", "stateresponse5", "stateresponse6",
+                   "stateresponse7")
 
+# Temporary per-event flag: did the state respond with physical force?
 data$violent_response <- apply(data[, response_cols], 1, function(row) {
   as.integer(any(grepl("kill|shoot|beat", row, ignore.case = TRUE)))
 })
 
-# Compute lags (within country, ordered by date)
+# Order chronologically within each country before computing lags.
 data <- data[order(data$country, data$start_date), ]
 
 data <- data %>%
   group_by(country) %>%
   mutate(
     lag1_state_violence = lag(violent_response, 1),
-    cum_state_violence = lag(cummean(violent_response), 1)
+    cum_state_violence  = lag(cummean(violent_response), 1)
   ) %>%
   ungroup()
 
-# First protest in each country has no history — fill with 0 (no prior info)
+# First event per country has no prior history -> assume no prior repression.
 data$lag1_state_violence[is.na(data$lag1_state_violence)] <- 0
-data$cum_state_violence[is.na(data$cum_state_violence)] <- 0
+data$cum_state_violence[is.na(data$cum_state_violence)]   <- 0
 
-# Remove the temporary column
-data$violent_response <- NULL
+data$violent_response <- NULL  # only needed to compute the lags above
 
-cat("Lag1 state violence rate:", mean(data$lag1_state_violence), "\n")
-cat("Cumulative state violence mean:", mean(data$cum_state_violence), "\n")
-
-# Year as factor for fixed effects
+## 1.6 Finalize analytic sample ----------------------------------------------
+# Year as a factor enables clean year fixed effects in the regressions.
 data$year_factor <- factor(data$year)
 
 cat("Final dataset:", nrow(data), "protest events,",
     length(unique(data$country)), "countries,",
     paste(range(data$year), collapse = "-"), "\n")
-cat("Violent protests:", sum(data$protesterviolence, na.rm = TRUE),
-    "(", round(mean(data$protesterviolence, na.rm = TRUE) * 100, 1), "%)\n")
 
-# Drop columns no longer needed (already encoded or unused)
+# Drop raw columns whose information is now captured by engineered features.
 drop_cols <- c("id", "ccode", "protest",
                "startday", "startmonth", "startyear",
                "endday", "endmonth", "endyear",
                "start_date", "end_date",
                "location", "participants_category", "participants",
                "protesteridentity",
-               "protesterdemand1", "protesterdemand2", "protesterdemand3", "protesterdemand4",
+               "protesterdemand1", "protesterdemand2",
+               "protesterdemand3", "protesterdemand4",
                "stateresponse1", "stateresponse2", "stateresponse3",
-               "stateresponse4", "stateresponse5", "stateresponse6", "stateresponse7",
+               "stateresponse4", "stateresponse5", "stateresponse6",
+               "stateresponse7",
                "sources", "notes")
 data <- data[, !(names(data) %in% drop_cols)]
 
 View(data)
 
-# Model 1: Baseline — what predicts protester violence?
-model1 <- glm(protesterviolence ~
-                log_protest_size +
-                protest_size_missing +
-                duration_days +
-                demand_political +
-                demand_labor +
-                demand_land +
-                demand_police +
-                demand_prices +
-                demand_corruption +
-                n_demands +
-                protestnumber +
-                lag1_state_violence +
-                cum_state_violence +
-                region +
-                year_factor,
-              data = data,
-              family = binomial(link = "logit"))
 
-summary(model1)
-
-# Marginal effects 
-logitmfx(protesterviolence ~
-           log_protest_size +
-           protest_size_missing +
-           duration_days +
-           demand_political +
-           demand_labor +
-           demand_land +
-           demand_police +
-           demand_prices +
-           demand_corruption +
-           n_demands +
-           protestnumber +
-           lag1_state_violence +
-           cum_state_violence +
-           region,
-         data = data, robust = TRUE, clustervar1 = "country")
-
-# Model 2: Adding large protest indicator
-model2 <- glm(protesterviolence ~
-                log_protest_size +
-                large_protest +
-                protest_size_missing +
-                duration_days +
-                demand_political +
-                demand_labor +
-                demand_land +
-                demand_corruption +
-                n_demands +
-                protestnumber +
-                lag1_state_violence +
-                cum_state_violence +
-                region +
-                year_factor,
-              data = data,
-              family = binomial(link = "logit"))
-
-summary(model2)
-coeftest(model2, vcov = vcovCL(model2, cluster = data$country))
