@@ -313,3 +313,184 @@ cat("\nVariance Inflation Factors (GVIF^(1/(2*Df)) for factors):\n")
 print(round(vif_vals, 3))
 
 
+# 3. General-to-Specific Feature Selection ------------------------------------
+# Following the LSE (Hendry) G2S approach demonstrated in Lab 08.
+# Protocol (mirrors AE_Lab_08_Gets_Better_codes.R):
+#   Start from the GUM containing every candidate regressor.
+#   At each step:
+#     1. Read cluster-robust p-values (coeftest + vcovCL by country).
+#     2. Identify the scalar regressor with the highest p-value.
+#     3. Test that ALL variables dropped so far (including this new one) are
+#        jointly zero in the GUM via an LR test (lrtest(gum, restricted)).
+#        - If p > 0.05 for the LR test (cannot reject H0) -> drop the variable.
+#        - If p <= 0.05 (would significantly worsen the GUM) -> stop.
+#   Stop when every remaining scalar coefficient is significant at alpha = 0.05.
+#   The surviving model is saved as `model_final`.
+#
+# NOTE: year_factor (multi-level FE) and region (factor) are treated as blocks:
+# they are never dropped individually — only as a group via a Wald/LR block test
+# at the end if all their constituent dummies are jointly insignificant.
+
+## 3.1 General Unrestricted Model (GUM) ---------------------------------------
+# All substantive candidates plus region and year fixed effects.
+gum <- glm(protesterviolence ~
+             log_protest_size +
+             large_protest +
+             protest_size_missing +
+             duration_days +
+             demand_political +
+             demand_labor +
+             demand_land +
+             demand_police +
+             demand_prices +
+             demand_corruption +
+             demand_social +
+             n_demands +
+             protestnumber +
+             lag1_state_violence +
+             cum_state_violence +
+             region +
+             year_factor,
+           data = data,
+           family = binomial(link = "logit"))
+
+# Cluster-robust SEs (clustered by country, same as Lab 08 / standard in panel
+# and cross-country data to account for within-country error correlation).
+ct_gum <- coeftest(gum, vcov = vcovCL(gum, cluster = data$country))
+print(ct_gum)
+
+## 3.2 Step 1: candidate drop — demand_social (p = 0.58) ----------------------
+# Most insignificant scalar regressor in the GUM. Test whether {demand_social=0}
+# is jointly acceptable in the GUM via LR test (Lab 08 pattern: always test
+# the cumulative dropped set against the GUM, not against the current model).
+step1 <- glm(protesterviolence ~
+               log_protest_size +
+               large_protest +
+               protest_size_missing +
+               duration_days +
+               demand_political +
+               demand_labor +
+               demand_land +
+               demand_police +
+               demand_prices +
+               demand_corruption +
+               n_demands +
+               protestnumber +
+               lag1_state_violence +
+               cum_state_violence +
+               region +
+               year_factor,
+             data = data,
+             family = binomial(link = "logit"))
+
+# LR test: H0: beta_demand_social = 0 in the GUM
+# p = 0.4894 -> cannot reject H0 -> demand_social can be dropped.
+lrtest(gum, step1)
+
+ct_step1 <- coeftest(step1, vcov = vcovCL(step1, cluster = data$country))
+print(ct_step1)
+
+## 3.3 Step 2: candidate drop — protestnumber (p = 0.20 in Step 1) ------------
+# Next most insignificant scalar. Test whether {demand_social=0, protestnumber=0}
+# are jointly zero in the GUM.
+step2_candidate <- glm(protesterviolence ~
+                         log_protest_size +
+                         large_protest +
+                         protest_size_missing +
+                         duration_days +
+                         demand_political +
+                         demand_labor +
+                         demand_land +
+                         demand_police +
+                         demand_prices +
+                         demand_corruption +
+                         n_demands +
+                         lag1_state_violence +
+                         cum_state_violence +
+                         region +
+                         year_factor,
+                       data = data,
+                       family = binomial(link = "logit"))
+
+# LR test: H0: beta_demand_social = beta_protestnumber = 0 in the GUM
+# p = 0.0063 -> REJECT H0 -> cannot drop protestnumber -> STOP elimination.
+lrtest(gum, step2_candidate)
+
+## 3.4 Final model ------------------------------------------------------------
+# Elimination stops after Step 1. The final model is the GUM minus demand_social.
+# `protestnumber` remains despite its p = 0.20 because the joint LR test
+# confirms it contributes significantly when tested against the full GUM.
+model_final <- step1
+
+ct_final <- coeftest(model_final, vcov = vcovCL(model_final, cluster = data$country))
+cat("\n=== Final model: cluster-robust standard errors ===\n")
+print(ct_final)
+
+## 3.5 Block tests: year_factor and region ------------------------------------
+# Individual levels of a factor block are never dropped one at a time in G2S.
+# Instead, we test each block as a whole: can ALL year dummies simultaneously
+# be set to zero without significantly worsening model_final?
+
+# year_factor block: model_final vs model_final without year_factor
+model_no_year <- glm(protesterviolence ~
+                       log_protest_size +
+                       large_protest +
+                       protest_size_missing +
+                       duration_days +
+                       demand_political +
+                       demand_labor +
+                       demand_land +
+                       demand_police +
+                       demand_prices +
+                       demand_corruption +
+                       n_demands +
+                       protestnumber +
+                       lag1_state_violence +
+                       cum_state_violence +
+                       region,
+                     data = data,
+                     family = binomial(link = "logit"))
+
+# LR test: H0: all year dummies = 0 jointly
+# Chi2(30) = 103, p = 6.2e-10 -> REJECT H0 -> year FE are jointly significant,
+# keep year_factor in the final model.
+lrtest(model_final, model_no_year)
+
+# region block: model_final vs model_final without region
+model_no_region <- glm(protesterviolence ~
+                         log_protest_size +
+                         large_protest +
+                         protest_size_missing +
+                         duration_days +
+                         demand_political +
+                         demand_labor +
+                         demand_land +
+                         demand_police +
+                         demand_prices +
+                         demand_corruption +
+                         n_demands +
+                         protestnumber +
+                         lag1_state_violence +
+                         cum_state_violence +
+                         year_factor,
+                       data = data,
+                       family = binomial(link = "logit"))
+
+# LR test: H0: all region dummies = 0 jointly
+# Chi2(7) = 129, p < 2.2e-16 -> REJECT H0 -> region FE are jointly significant,
+# keep region in the final model.
+lrtest(model_final, model_no_region)
+
+## 3.6 GUM vs final model comparison table ------------------------------------
+# Displays both models side by side for the report; shows what was dropped and
+# what changed in significance.
+stargazer(gum, model_final,
+          type = "text",
+          title = "G2S selection: GUM vs final model",
+          column.labels = c("GUM", "Final"),
+          omit = "year_factor",
+          omit.labels = "Year FE",
+          add.lines = list(c("Year FE", "Yes", "Yes")),
+          digits = 3)
+
+
