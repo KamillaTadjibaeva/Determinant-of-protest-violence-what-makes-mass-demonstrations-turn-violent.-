@@ -494,3 +494,151 @@ stargazer(gum, model_final,
           digits = 3)
 
 
+# 4. Modeling and Interpretation ----------------------------------------------
+# All tests operate on `model_final` (logit, GUM minus demand_social, from Part 3).
+# Pattern follows Lab 03: LR vs null -> Wald block -> quasi-separation check ->
+# linktest -> GoF (HL / OR / Stukel) -> pseudo-R2 -> ROC -> confusion matrix ->
+# marginal effects -> LPM benchmark -> probit robustness -> stargazer table.
+
+## 4.1 Joint significance: LR test vs null model -----------------------------
+# H0: all slope coefficients = 0 simultaneously.
+# Chi2(51) = 1162, p < 2.2e-16 -> model is globally highly significant.
+null_model <- glm(protesterviolence ~ 1, data = data,
+                  family = binomial(link = "logit"))
+lrtest(null_model, model_final)
+
+## 4.2 Wald test: all demand dummies jointly = 0 -----------------------------
+# Demand-topic dummies were added for theoretical reasons; test them as a block.
+# Chi2(6) = 150, p ≈ 0 -> demand type matters jointly, keep all six dummies.
+demand_idx <- grep("^demand_", names(coef(model_final)))
+H_demand   <- diag(length(coef(model_final)))[demand_idx, ]
+wald.test(b = coef(model_final), Sigma = vcov(model_final), L = H_demand)
+
+## 4.3 Quasi-separation check -------------------------------------------------
+# Fitted probs outside (0.001, 0.999) would indicate near-perfect separation
+# and require Firth's bias-reduced logit (logistf).
+# Min = 0.047, Max = 0.990 -> no separation; standard logit is appropriate.
+fp <- model_final$fitted.values
+cat("Fitted prob range: [", round(min(fp), 4), ",", round(max(fp), 4), "]\n")
+cat("Extreme obs (p < 0.001 or > 0.999):", sum(fp < 0.001 | fp > 0.999), "\n")
+
+## 4.4 Linktest (specification check) ----------------------------------------
+# yhat should be significant, yhat2 should NOT be (Lab 03, linktest.R).
+# Result: yhat2 p = 4.65e-07 -> significant -> suggests possible misspecification
+# (likely missing nonlinear or interaction terms; noted as a caveat).
+source("class_materials/Lab 03 (2026-03-06)-20260526/linktest.R")
+linktest_result <- linktest(model_final)
+
+## 4.5 Goodness-of-fit tests --------------------------------------------------
+# Three complementary GoF tests from AllGOFTests.R (Lab 03).
+source("class_materials/Lab 03 (2026-03-06)-20260526/AllGOFTests.R")
+
+# Hosmer-Lemeshow (g = 10 groups): X2 = 16.3, p = 0.039
+# -> marginal rejection at 5%; model calibration could be improved.
+HLTest(model_final, g = 10)
+
+# Osius-Rojek: z = 1.69, p = 0.091
+# -> cannot reject H0 at 5%; passes this test.
+o.r.test(model_final)
+
+# Stukel: stat = 39.1, p = 3.2e-09
+# -> strongly rejects; confirms the linktest signal that the logit link
+# function may not capture the full nonlinearity in the tails.
+stukel.test(model_final)
+
+## 4.6 Pseudo-R2 statistics ---------------------------------------------------
+# None of these is R2 in the OLS sense; McFadden > 0.2 is conventionally
+# considered a good fit for binary logit; 0.066 is modest but typical for
+# aggregate protest data with significant unobserved heterogeneity.
+ll_full <- as.numeric(logLik(model_final))
+ll_null <- as.numeric(logLik(null_model))
+n       <- nrow(data)
+
+R2_mcfadden  <- 1 - ll_full / ll_null
+R2_coxsnell  <- 1 - exp((2 / n) * (ll_null - ll_full))
+R2_nagelkerke <- R2_coxsnell / (1 - exp((2 / n) * ll_null))
+
+cat(sprintf("McFadden R2:   %.4f\n", R2_mcfadden))    # 0.0660
+cat(sprintf("Cox-Snell R2:  %.4f\n", R2_coxsnell))    # 0.0734
+cat(sprintf("Nagelkerke R2: %.4f\n", R2_nagelkerke))  # 0.1072
+
+## 4.7 ROC curve & AUC --------------------------------------------------------
+# AUC = 0.677: model discriminates meaningfully above chance (0.5) but has
+# room for improvement — consistent with the unobserved-heterogeneity caveat.
+g_roc <- roc(data$protesterviolence, model_final$fitted.values, quiet = TRUE)
+plot(g_roc, col = "firebrick", lwd = 2,
+     main = paste("ROC curve — Final logit model  (AUC =",
+                  round(auc(g_roc), 3), ")"))
+abline(a = 0, b = 1, col = "grey60", lty = 2)
+
+## 4.8 Confusion matrix at optimal threshold ----------------------------------
+# Youden-optimal threshold = 0.264 (balances sensitivity and specificity).
+# Accuracy 0.646, Sensitivity 0.614, Specificity 0.658.
+best_coords <- coords(g_roc, "best",
+                      ret = c("threshold", "sensitivity", "specificity", "accuracy"))
+print(round(best_coords, 4))
+
+thresh     <- as.numeric(best_coords["threshold"])
+pred_class <- ifelse(model_final$fitted.values >= thresh, 1, 0)
+cm_tbl     <- table(Predicted = pred_class, Actual = data$protesterviolence)
+print(cm_tbl)
+cat("Accuracy:   ", round(mean(pred_class == data$protesterviolence), 4), "\n")
+cat("Sensitivity:", round(cm_tbl[2, 2] / sum(cm_tbl[, 2]), 4), "\n")
+cat("Specificity:", round(cm_tbl[1, 1] / sum(cm_tbl[, 1]), 4), "\n")
+
+## 4.9 Marginal effects at the mean (cluster-robust) --------------------------
+# Average partial effects evaluated at the sample mean of all regressors.
+# year_factor omitted from the mfx formula (many dummies; region is kept).
+# Interpretation examples:
+#   demand_police: +26pp — protests demanding police accountability are the
+#     most likely to turn violent (consistent with confrontational framing).
+#   cum_state_violence: +35pp — countries with a higher historical rate of
+#     state repression see dramatically more violent protests (escalation trap).
+#   log_protest_size: -2pp per log-unit — larger crowds marginally reduce
+#     per-event violence risk (diffusion / policing effect).
+fml_no_yf <- protesterviolence ~
+  log_protest_size + large_protest + protest_size_missing + duration_days +
+  demand_political + demand_labor + demand_land + demand_police +
+  demand_prices + demand_corruption +
+  n_demands + protestnumber + lag1_state_violence + cum_state_violence + region
+
+logitmfx(fml_no_yf, data = data, atmean = TRUE,
+         robust = TRUE, clustervar1 = "country")
+
+## 4.10 LPM benchmark ---------------------------------------------------------
+# The linear probability model is estimated for comparison.
+# BP test: p < 2.2e-16 -> strong heteroscedasticity (expected for LPM with a
+# binary DV), which is why we prefer the logit.
+# Coefficient signs and significance are directionally consistent with logit.
+lpm <- lm(update(fml_no_yf, . ~ . + year_factor), data = data)
+bptest(lpm)  # Breusch-Pagan: BP = 866, p < 2.2e-16
+
+ct_lpm <- coeftest(lpm, vcov = vcovHC(lpm, type = "HC"))
+scalar_rows <- !grepl("^year_factor|^region", rownames(ct_lpm))
+cat("LPM HC-robust scalar coefficients:\n")
+print(round(ct_lpm[scalar_rows, ], 4))
+
+## 4.11 Probit robustness check -----------------------------------------------
+# Estimated with the same specification as model_final.
+# All signs identical to logit; same variables significant at 5%.
+# Confirms results are not an artefact of the logistic functional form.
+model_probit <- glm(model_final$formula, data = data,
+                    family = binomial(link = "probit"))
+ct_probit <- coeftest(model_probit,
+                      vcov = vcovCL(model_probit, cluster = data$country))
+scalar_p <- !grepl("^year_factor|^region", rownames(ct_probit))
+cat("Probit cluster-robust scalar coefficients:\n")
+print(round(ct_probit[scalar_p, ], 4))
+
+## 4.12 Three-model comparison table (logit / probit / LPM) ------------------
+stargazer(model_final, model_probit, lpm,
+          type = "text",
+          title = "Final model comparison: logit, probit, LPM",
+          column.labels = c("Logit", "Probit", "LPM"),
+          omit = "year_factor",
+          omit.labels = "Year FE",
+          add.lines = list(c("Year FE", "Yes", "Yes", "Yes"),
+                           c("SE type", "Cluster", "Cluster", "HC")),
+          digits = 3)
+
+
