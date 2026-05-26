@@ -188,3 +188,128 @@ data <- data[, !(names(data) %in% drop_cols)]
 View(data)
 
 
+# 2. Exploratory Data Analysis ------------------------------------------------
+# Descriptive view of the analytic sample before any modeling: a summary table,
+# a missingness guard, outcome distribution by region / year / regressor, the
+# size distribution that motivates the log transform, and a multicollinearity
+# diagnostic (correlation matrix + VIFs).
+
+## 2.1 Summary statistics -----------------------------------------------------
+summary_vars <- c("protesterviolence",
+                  "protest_size", "log_protest_size", "protest_size_missing",
+                  "large_protest", "duration_days", "n_demands", "protestnumber",
+                  "demand_labor", "demand_land", "demand_police",
+                  "demand_political", "demand_prices", "demand_corruption",
+                  "demand_social",
+                  "lag1_state_violence", "cum_state_violence")
+
+stargazer(as.data.frame(data[, summary_vars]),
+          type = "text",
+          title = "Descriptive statistics — analytic sample",
+          digits = 3,
+          summary.stat = c("n", "mean", "sd", "min", "p25", "median", "p75", "max"))
+
+## 2.2 Missingness sanity check -----------------------------------------------
+# All NAs are resolved by construction (size imputed, dummies are 0/1, lags
+# filled with 0 for first event). Guards against silent regressions if the
+# cleaning logic changes later.
+stopifnot(sum(sapply(data, function(x) sum(is.na(x)))) == 0)
+cat("Missingness check passed: 0 NAs across", ncol(data), "columns.\n")
+
+## 2.3 Outcome distribution: violent vs peaceful ------------------------------
+cat("\nOverall share of violent protests:",
+    round(mean(data$protesterviolence, na.rm = TRUE), 3),
+    "  (", sum(data$protesterviolence, na.rm = TRUE), "events)\n")
+
+# Region-level shares + sample counts.
+viol_by_region <- aggregate(protesterviolence ~ region, data = data,
+                            FUN = function(x) c(n = length(x),
+                                                share = mean(x, na.rm = TRUE)))
+print(viol_by_region)
+
+# Year-level trend.
+viol_by_year <- aggregate(protesterviolence ~ year, data = data, FUN = mean)
+plot(viol_by_year$year, viol_by_year$protesterviolence, type = "l",
+     lwd = 2, col = "firebrick",
+     xlab = "Year", ylab = "Share of violent protests",
+     main = "Share of violent protests over time")
+abline(h = mean(data$protesterviolence, na.rm = TRUE),
+       col = "grey50", lty = 2)
+
+## 2.4 Protest size distribution (raw vs log) ---------------------------------
+# Motivation for the log transform applied during cleaning.
+par(mfrow = c(1, 2))
+hist(data$protest_size, breaks = 50,
+     col = "steelblue", border = "white",
+     main = "Protest Size (Raw)", xlab = "Participants")
+abline(v = median(data$protest_size, na.rm = TRUE),
+       col = "red", lwd = 2, lty = 2)
+hist(data$log_protest_size, breaks = 30,
+     col = "darkgreen", border = "white",
+     main = "Protest Size (Log)", xlab = "log(Participants + 1)")
+par(mfrow = c(1, 1))
+
+## 2.5 Outcome vs key regressors ----------------------------------------------
+# Quick visual evidence on whether candidate features actually shift P(violent).
+par(mfrow = c(2, 2))
+
+barplot(tapply(data$protesterviolence, data$region, mean),
+        col = "steelblue", border = "white",
+        main = "Violent share by region", ylab = "P(violent)")
+
+barplot(tapply(data$protesterviolence, data$large_protest, mean),
+        names.arg = c("Small (<1000)", "Large (>=1000)"),
+        col = "darkorange", border = "white",
+        main = "Violent share by protest size", ylab = "P(violent)")
+
+barplot(tapply(data$protesterviolence, data$lag1_state_violence, mean),
+        names.arg = c("No prior state violence", "Prior state violence"),
+        col = "darkred", border = "white",
+        main = "Violent share by lagged state violence", ylab = "P(violent)")
+
+plot(density(data$log_protest_size[data$protesterviolence == 0]),
+     col = "steelblue", lwd = 2,
+     main = "log(size) density: violent vs peaceful",
+     xlab = "log(protest_size + 1)")
+lines(density(data$log_protest_size[data$protesterviolence == 1]),
+      col = "firebrick", lwd = 2)
+legend("topright", legend = c("Peaceful", "Violent"),
+       col = c("steelblue", "firebrick"), lwd = 2, bty = "n")
+
+par(mfrow = c(1, 1))
+
+# Per-demand-dummy violent share (helps decide which topics matter).
+demand_dummies <- c("demand_labor", "demand_land", "demand_police",
+                    "demand_political", "demand_prices",
+                    "demand_corruption", "demand_social")
+demand_shares <- sapply(demand_dummies, function(v) {
+  c(share_when_1 = mean(data$protesterviolence[data[[v]] == 1], na.rm = TRUE),
+    share_when_0 = mean(data$protesterviolence[data[[v]] == 0], na.rm = TRUE),
+    n_when_1     = sum(data[[v]] == 1, na.rm = TRUE))
+})
+print(round(t(demand_shares), 3))
+
+## 2.6 Correlation matrix & VIF -----------------------------------------------
+# Pre-modeling multicollinearity diagnostic.
+num_vars <- c("log_protest_size", "duration_days", "n_demands", "protestnumber",
+              "large_protest", "protest_size_missing",
+              "demand_labor", "demand_land", "demand_police",
+              "demand_political", "demand_prices", "demand_corruption",
+              "demand_social",
+              "lag1_state_violence", "cum_state_violence")
+
+cor_mat <- cor(data[, num_vars], use = "pairwise.complete.obs")
+corrplot(cor_mat, method = "color", type = "upper",
+         tl.cex = 0.7, tl.col = "black",
+         addCoef.col = "black", number.cex = 0.55,
+         title = "Correlation matrix of candidate regressors",
+         mar = c(0, 0, 1.5, 0))
+
+vif_lpm <- lm(protesterviolence ~ . - country - year - year_factor,
+              data = data[, c("protesterviolence", num_vars,
+                              "region", "country", "year", "year_factor")])
+vif_vals <- car::vif(vif_lpm)
+cat("\nVariance Inflation Factors (GVIF^(1/(2*Df)) for factors):\n")
+print(round(vif_vals, 3))
+
+
