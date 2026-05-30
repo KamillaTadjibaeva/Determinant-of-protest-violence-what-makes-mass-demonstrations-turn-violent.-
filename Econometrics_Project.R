@@ -701,6 +701,28 @@ print(round(ic_compare[, -1], 2), row.names = ic_compare$Model)
 # Probit is marginally preferred (DeltaAIC ~ 2) but within the
 # Burnham-Anderson "essentially no difference" band. We retain logit.
 
+# ----- Odds ratios for the final logit -----
+# OR = exp(coef): factor change in odds for a one-unit increase in x.
+# OR > 1 -> increases violence odds; OR < 1 -> decreases them.
+# 95% CI from exp(coef +/- 1.96*SE).
+# (Not explicitly demonstrated in Lab 03; standard formula from Long 1997.)
+or    <- exp(coef(model_final))
+or_ci <- exp(confint.default(model_final))
+or_tab <- cbind(OR = or, CI_lo = or_ci[, 1], CI_hi = or_ci[, 2])
+scalar_or <- !grepl("^year_factor|^region", rownames(or_tab))
+cat("\nOdds ratios (final logit, scalar regressors):\n")
+print(round(or_tab[scalar_or, ], 3))
+
+# Interpretation highlights:
+#   cum_state_violence  OR = 5.66 -> a unit rise in the historical share of
+#       repressive responses multiplies the odds of violence by ~5.7x.
+#   demand_police       OR = 3.15 -> protests demanding police accountability
+#       have ~3.2x the odds of turning violent vs comparable protests without.
+#   demand_prices       OR = 2.88 -> cost-of-living protests carry ~2.9x odds.
+#   lag1_state_violence OR = 1.32 -> recent state repression raises odds 32%.
+#   log_protest_size    OR = 0.90 -> each log-unit larger crowd reduces odds 10%.
+#   n_demands           OR = 0.66 -> each additional demand topic cuts odds 34%.
+
 ## 4.12 Three-model comparison table (logit / probit / LPM) ------------------
 stargazer(model_final, model_probit, lpm,
           type = "text",
