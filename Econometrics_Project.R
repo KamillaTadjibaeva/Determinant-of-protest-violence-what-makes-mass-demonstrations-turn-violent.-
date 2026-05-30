@@ -723,7 +723,21 @@ print(round(or_tab[scalar_or, ], 3))
 #   log_protest_size    OR = 0.90 -> each log-unit larger crowd reduces odds 10%.
 #   n_demands           OR = 0.66 -> each additional demand topic cuts odds 34%.
 
-## 4.12 Three-model comparison table (logit / probit / LPM) ------------------
+## 4.12 General vs final, logit vs probit (single quality table) -------------
+# Required by the rubric: present general AND final, logit AND probit, side by
+# side. Shows (i) G2S only dropped demand_social, and (ii) logit & probit
+# coefficients differ by the usual scale factor (~1.6-1.8x) but signs and
+# significance match exactly, confirming robustness to the link function.
+stargazer(gum, model_final, gum_probit, model_probit,
+          type = "text",
+          title = "General vs Final: logit and probit",
+          column.labels = c("Logit GUM", "Logit Final", "Probit GUM", "Probit Final"),
+          omit = "year_factor",
+          omit.labels = "Year FE",
+          add.lines = list(c("Year FE", "Yes", "Yes", "Yes", "Yes")),
+          digits = 3)
+
+## 4.13 Three-model comparison table (logit / probit / LPM) ------------------
 stargazer(model_final, model_probit, lpm,
           type = "text",
           title = "Final model comparison: logit, probit, LPM",
