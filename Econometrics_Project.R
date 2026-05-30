@@ -493,6 +493,26 @@ stargazer(gum, model_final,
           add.lines = list(c("Year FE", "Yes", "Yes")),
           digits = 3)
 
+## 3.7 Interaction term extension --------------------------------------------
+# Theoretical motivation: prior state violence may have a stronger effect on
+# LARGE protests, because the combination of crowd dynamics and state
+# escalation could be multiplicative (escalation amplifies with crowd size).
+# We test whether adding large_protest * lag1_state_violence improves fit.
+model_int <- glm(update(model_final$formula,
+                        . ~ . + large_protest:lag1_state_violence),
+                 data = data, family = binomial(link = "logit"))
+
+ct_int <- coeftest(model_int, vcov = vcovCL(model_int, cluster = data$country))
+cat("\nInteraction term (large_protest x lag1_state_violence):\n")
+print(ct_int[grep("large_protest|lag1_state", rownames(ct_int)), ])
+
+# LR test: H0: interaction coefficient = 0
+# Chi2(1) = 0.07, p = 0.79 -> cannot reject H0 -> interaction does NOT improve
+# fit. The marginal effect of prior state violence is statistically the same
+# for large and small protests. We retain model_final without the interaction
+# but report this test as required diagnostic content.
+lrtest(model_final, model_int)
+
 
 # 4. Modeling and Interpretation ----------------------------------------------
 # All tests operate on `model_final` (logit, GUM minus demand_social, from Part 3).
