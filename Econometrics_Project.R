@@ -582,6 +582,37 @@ cat(sprintf("McFadden R2:   %.4f\n", R2_mcfadden))    # 0.0660
 cat(sprintf("Cox-Snell R2:  %.4f\n", R2_coxsnell))    # 0.0734
 cat(sprintf("Nagelkerke R2: %.4f\n", R2_nagelkerke))  # 0.1072
 
+# McKelvey-Zavoina R2: based on the latent-variable interpretation of logit.
+# Formula: var(linear index) / (var(linear index) + pi^2/3) for logit.
+# Best comparable to OLS R2 because it operates on the latent y*.
+# Lab 03 (AE_Lab_03_Logit.R, line ~91) uses BaylorEdPsych::PseudoR2() which
+# returns this same statistic; we compute it manually to avoid the archived
+# CRAN dependency.
+yhat_idx <- predict(model_final, type = "link")
+R2_MZ    <- var(yhat_idx) / (var(yhat_idx) + pi^2 / 3)
+cat(sprintf("McKelvey-Zavoina R2: %.4f\n", R2_MZ))    # 0.1113
+
+# Count R2: classification accuracy at the 0.5 cutoff.
+# Naive measure; can look high even for a poor model if the outcome is rare.
+# Lab 03 obtains this from BaylorEdPsych::PseudoR2() as well.
+pred05    <- as.integer(model_final$fitted.values >= 0.5)
+correct   <- sum(pred05 == data$protesterviolence)
+R2_count  <- correct / n
+cat(sprintf("Count R2:            %.4f  (%d / %d correct)\n",
+            R2_count, correct, n))                     # 0.7417
+
+# Adjusted count R2: improvement over the majority-class baseline (Long 1997).
+# Negative or near-zero -> model barely beats predicting the modal outcome.
+# Lab 03 reference: BaylorEdPsych::PseudoR2() "Count Adj" entry.
+n_majority   <- max(table(data$protesterviolence))
+R2_count_adj <- (correct - n_majority) / (n - n_majority)
+cat(sprintf("Adjusted count R2:   %.4f  (majority baseline = %d)\n",
+            R2_count_adj, n_majority))                 # 0.0245
+
+# Verdict: the model's added value over "always predict peaceful" is real
+# but small in absolute terms (only ~2.5pp gain in classification),
+# matching the AUC=0.677 evidence of modest discrimination.
+
 ## 4.7 ROC curve & AUC --------------------------------------------------------
 # AUC = 0.677: model discriminates meaningfully above chance (0.5) but has
 # room for improvement — consistent with the unobserved-heterogeneity caveat.
