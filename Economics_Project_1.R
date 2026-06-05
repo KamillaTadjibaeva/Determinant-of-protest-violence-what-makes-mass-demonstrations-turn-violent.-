@@ -13,7 +13,6 @@ library(logistf)     # Firth's bias-reduced logit (for quasi-separation)
 library(stargazer)   # publication-quality summary / regression tables
 library(car)         # vif()
 library(corrplot)    # correlation heatmaps
-library(pROC)        # roc(), auc(), coords() for ROC curve
 
 
 # 1. Data Loading & Cleaning
@@ -199,7 +198,7 @@ drop_cols <- c("id", "ccode", "protest",
                "sources", "notes")
 data <- data[, !(names(data) %in% drop_cols)]
 
-View(data)
+#View(data)
 
 
 # 2. Exploratory Data Analysis
@@ -642,7 +641,14 @@ linearHypothesis(gum, c(
 #Now we have to stop the process, this is the best model we can get. 
 model_final <- gum7
 
+#MARGINAL EFFECTS
+# Marginal effects at the mean
+logitmfx(model_final$formula, data = data, atmean = TRUE,
+         robust = TRUE, clustervar1 = "country")
 
+# Average marginal effects (averaged over all observations)
+logitmfx(model_final$formula, data = data, atmean = FALSE,
+         robust = TRUE, clustervar1 = "country")
 
 # GUM vs final model comparison table
 stargazer(gum, model_final,
@@ -661,7 +667,7 @@ stargazer(gum, model_final,
 # We run linktest: yhat should be significant, yhat2 should NOT be.
 # Result: yhat2 is significant -> suggests possible misspecification,
 # likely missing nonlinear or interaction terms.
-source("class_materials/Lab 03 (2026-03-06)-20260526/linktest.R")
+source("Lab 03 (2026-03-06)-20260306/linktest.R")
 linktest_result <- linktest(model_final)
 
 # Linktest rejects (yhat2 significant) -> misspecification detected.
@@ -705,7 +711,7 @@ linktest(model_final)
 #adding interaction variables did not help to make the yhat2 insignificant, 
 # but it did help to make it LESS significant
 
-source("class_materials/Lab 03 (2026-03-06)-20260526/AllGOFTests.R")
+source("Lab 03 (2026-03-06)-20260306/AllGOFTests.R")
 
 # Hosmer-Lemeshow (g = 10 groups): X2 = 16.3, p = 0.039
 #H0: model is ok
