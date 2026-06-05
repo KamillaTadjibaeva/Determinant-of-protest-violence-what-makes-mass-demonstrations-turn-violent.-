@@ -168,14 +168,42 @@ No observations are dropped beyond the initial \texttt{protest == 1} filter. All
 \paragraph{Violence by region.}
 Violence rates vary substantially across regions: Africa and South America exhibit the highest shares of violent protests, while Europe and MENA show lower rates conditional on protest occurrence.
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/outcome_vs_regressors.pdf}
+\caption{Bivariate associations with protest violence. Violence shares differ across regions and are markedly higher when the previous event in the same country involved state violence; larger (log) protests are also distributed differently between violent and peaceful events.}
+\label{fig:outcome-regressors}
+\end{figure}
+
 \paragraph{Violence by state history.}
 Protests preceded by state violence in the previous event show markedly higher violence rates than those without such precedent, providing preliminary visual evidence for the escalation hypothesis.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/violence_by_year.pdf}
+\caption{Share of violent protests by year, 1990--2020. Year-to-year variation around the global mean motivates the inclusion of year fixed effects.}
+\label{fig:violence-year}
+\end{figure}
 
 \paragraph{Size distribution.}
 The raw protest size distribution is extremely right-skewed (median $\approx$ 550, with outliers above 15,000). The log-transformation produces an approximately symmetric distribution, supporting its use in the regression.
 
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/protest_size_distribution.pdf}
+\caption{Distribution of protest size. Left: raw participants count is heavily right-skewed. Right: after the $\ln(\text{size}+1)$ transformation the distribution is approximately symmetric, justifying the use of \texttt{log\_protest\_size} in the regression.}
+\label{fig:size-dist}
+\end{figure}
+
 \paragraph{Multicollinearity.}
 Variance inflation factors (VIFs) computed on a preliminary linear model are all below conventional thresholds (max VIF $< 5$), confirming that multicollinearity is not a concern for our candidate regressors.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{figures/correlation_matrix.pdf}
+\caption{Spearman correlation matrix of candidate regressors and the outcome. No pair exhibits correlation strong enough to threaten identification, consistent with the VIF diagnostic.}
+\label{fig:corr-matrix}
+\end{figure}
 
 % ═══════════════════════════════════════════════════════════════════════════════
 \section{Method / Model}
@@ -733,6 +761,13 @@ Adjusted Count $R^2$ & 0.0317 \\
   \item \textbf{McKelvey--Zavoina $R^2 = 0.1139$}: If the hidden (latent) variable underlying the binary outcome were directly observed, the model would explain 11.4\% of its variation.
   \item \textbf{Adjusted Count $R^2 = 0.0317$}: 3.2\% of all observations are correctly predicted \emph{only} due to variation in the $X$ variables (i.e., improvement over simply predicting the modal class for every observation).
 \end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.7\textwidth]{figures/roc_curve.pdf}
+\caption{ROC curve of the final logit model. The area under the curve (AUC) summarises the model's ability to rank violent above peaceful protests across all classification thresholds.}
+\label{fig:roc}
+\end{figure}
 
 
 
