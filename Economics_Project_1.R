@@ -667,7 +667,7 @@ stargazer(gum, model_final,
 # We run linktest: yhat should be significant, yhat2 should NOT be.
 # Result: yhat2 is significant -> suggests possible misspecification,
 # likely missing nonlinear or interaction terms.
-source("Lab 03 (2026-03-06)-20260306/linktest.R")
+source("class_materials/Lab 03 (2026-03-06)-20260526/linktest.R")
 linktest_result <- linktest(model_final)
 
 # Linktest rejects (yhat2 significant) -> misspecification detected.
@@ -711,7 +711,7 @@ linktest(model_final)
 #adding interaction variables did not help to make the yhat2 insignificant, 
 # but it did help to make it LESS significant
 
-source("Lab 03 (2026-03-06)-20260306/AllGOFTests.R")
+source("class_materials/Lab 03 (2026-03-06)-20260526/AllGOFTests.R")
 
 # Hosmer-Lemeshow (g = 10 groups): X2 = 16.3, p = 0.039
 #H0: model is ok
