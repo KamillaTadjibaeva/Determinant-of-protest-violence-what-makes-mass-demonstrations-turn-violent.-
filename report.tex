@@ -550,12 +550,7 @@ Since logit coefficients are not directly interpretable as probability changes (
 
 \subsubsection{Why Some Marginal Effects Differ Between Models}
 
-When interaction terms are added, \texttt{logitmfx} reports the partial derivative of the predicted probability with respect to each variable, \emph{including} the contribution through the interaction term evaluated at the sample means. For variables not in any interaction, effects are virtually unchanged. For interacted variables, the reported marginal effect now reflects the \emph{conditional} effect at the mean of the interacting partner. Specifically:
-\begin{itemize}
-  \item \texttt{duration\_days} flips sign because the marginal effect is now $\frac{\partial P}{\partial \text{duration}} \propto (\beta_{\text{duration}} + \beta_{\text{interaction}} \times \overline{\text{log\_size}})$, and evaluated at mean log-size this is negative---but this is misleading since for any realistic protest ($>75$ people) the net effect remains positive (see Section on coefficient signs).
-  \item \texttt{demand\_police} increases because its marginal effect now captures the ``pure'' demand premium at mean cum\_state\_violence, which is higher than the average effect pooled over all repression levels.
-  \item \texttt{cum\_state\_violence} increases for the same reason---it now captures the repression effect at mean demand\_police.
-\end{itemize}
+When interaction terms are added, \texttt{logitmfx} reports the partial derivative of the predicted probability with respect to each variable, \emph{including} the contribution through the interaction term evaluated at the sample means. For variables not in any interaction, effects are virtually unchanged. For interacted variables, the reported marginal effect now reflects the \emph{conditional} effect at the mean of the interacting partner.
 
 \subsubsection{Before Interactions (gum7)}
 
@@ -655,9 +650,6 @@ If the state used violence at the preceding protest, current violence probabilit
 
 \paragraph{Log protest size ($-$2.1pp, $p < 0.001$; was $-$1.9pp before).}
 A one-unit increase in log(size+1) decreases violence by 2.1pp. \emph{Economic reasoning}: Larger crowds create a ``safety in numbers'' effect where social pressure maintains order and numerical advantage deters aggressive state responses.
-
-\paragraph{Duration ($-$0.2pp, $p = 0.001$; was +0.1pp before, $p = 0.076$).}
-The marginal effect of one additional day flips from $+0.1$pp (marginally significant) to $-0.2$pp (significant). \emph{Why the sign flips}: This is a mechanical artefact of the interaction decomposition---the reported marginal effect is now $\frac{\partial P}{\partial \text{duration}} = f'(\cdot) \times (\beta_{\text{dur}} + \beta_{\text{int}} \times \overline{\text{log\_size}})$, evaluated at the sample mean. Because the main effect of duration is negative in the presence of the interaction (it represents the effect at log\_size $= 0$), the reported marginal effect at the mean can appear negative depending on the evaluation point. \emph{Substantive interpretation}: As shown in the coefficient-signs section, for any realistically sized protest ($>75$ people), longer duration \emph{still increases} violence probability---consistent with the economic intuition that prolonged protests deplete participants' patience, strain policing resources, and create repeated opportunities for provocation incidents.
 
 \paragraph{Interaction: demand\_police $\times$ cum\_state\_violence ($-$28.3pp, $p < 0.05$).}
 The interaction reduces violence probability by 28.3pp. \emph{Economic reasoning}: In already-repressive environments, baseline violence risk is elevated for all protest types, so the additional signal of a police-related demand becomes redundant.
